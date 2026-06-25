@@ -21,13 +21,15 @@ pub fn build(b: *std.Build) !void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const exe = b.addExecutable(.{
-        .name = "weirdfetch",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = .{ .path = "src/main.zig" },
+    const root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "weirdfetch",
+        .root_module = root_module,
     });
 
     var options = b.addOptions();
@@ -35,10 +37,10 @@ pub fn build(b: *std.Build) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
 
-    const allocator = &arena.allocator();
+    const allocator = arena.allocator();
 
     const username = whoami.getUsername();
-    var hostname = try whoami.getHostname(allocator);
+    const hostname = try whoami.getHostname(allocator);
     const wm_name = try wm.getWm();
     const init_name = try init.getInit(allocator);
     const os_name = try os.getOSReleaseID(allocator);
@@ -51,7 +53,7 @@ pub fn build(b: *std.Build) !void {
     options.addOption([]const u8, "os_name", os_name);
     options.addOption([]const u8, "kernel_version", kernel_version);
     options.addOption([]const u8, "shell_bin", shell_bin);
-    exe.addOptions("options", options);
+    root_module.addOptions("options", options);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
@@ -84,18 +86,23 @@ pub fn build(b: *std.Build) !void {
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
 
-    // #TODO: ADD UNIT TESTS
-    // const unit_tests = b.addTest(.{
-    //     .root_source_file = .{ .path = "src/main.zig" },
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
+    const wm_test_module = b.createModule(.{
+        .root_source_file = b.path("src/wm.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const wm_tests = b.addTest(.{ .root_module = wm_test_module });
+    const run_wm_tests = b.addRunArtifact(wm_tests);
 
-    // const run_unit_tests = b.addRunArtifact(unit_tests);
+    const os_test_module = b.createModule(.{
+        .root_source_file = b.path("src/os.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const os_tests = b.addTest(.{ .root_module = os_test_module });
+    const run_os_tests = b.addRunArtifact(os_tests);
 
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    // const test_step = b.step("test", "Run unit tests");
-    // test_step.dependOn(&run_unit_tests.step);
+    const test_step = b.step("test", "Run unit tests");
+    test_step.dependOn(&run_wm_tests.step);
+    test_step.dependOn(&run_os_tests.step);
 }
